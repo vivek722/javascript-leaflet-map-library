@@ -1,0 +1,146 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Find Branch Locations</title>
+    <link rel="stylesheet" href="https://unpkg.com/leaflet/dist/leaflet.css" />
+    <style>
+        body {
+            margin: 0;
+            display: flex;
+            flex-direction: column;
+            height: 100vh;
+        }
+        #controls {
+            padding: 10px;
+            background-color: #f4f4f4;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+        #map {
+            flex-grow: 1;
+        }
+    </style>
+</head>
+<body>
+    <div id="controls">
+        <input id="branchInput" type="text" placeholder="Enter branch name (e.g., McDonald's)" />
+        <button id="searchButton">Search</button>
+    </div>
+    <div id="map"></div>
+
+    <script src="https://unpkg.com/leaflet/dist/leaflet.js"></script>
+    <script>
+
+        const map = L.map('map').setView([21.1702, 72.8311], 12); 
+
+        
+        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+            attribution: '&copy; OpenStreetMap contributors'
+        }).addTo(map);
+
+        
+        function calculateDistance(lat1, lon1, lat2, lon2) {
+            const R = 6371; 
+            const dLat = (lat2 - lat1) * Math.PI / 180;
+            const dLon = (lon2 - lon1) * Math.PI / 180;
+            const a = Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+                Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) *
+                Math.sin(dLon / 2) * Math.sin(dLon / 2);
+            const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+            return R * c; 
+        }
+
+        
+        function fetchLocations(branchName, lat, lon, radius,cityBounds = null) {
+            let overpassUrl = '';
+            if (cityBounds) {
+                const [south, north, west, east] = cityBounds;
+                overpassUrl = `https://overpass-api.de/api/interpreter?data=[out:json];(node["name"="${branchName}"](${south},${west},${north},${east});way["name"="${branchName}"](${south},${west},${north},${east});relation["name"="${branchName}"](${south},${west},${north},${east}););out;`;
+            } 
+             else if (radius) 
+            {
+                branchName = branchName.replace('near me', '').trim();
+                overpassUrl = `https://overpass-api.de/api/interpreter?data=[out:json];(node["name"="${branchName}"](around:${radius},${lat},${lon});way["name"="${branchName}"](around:${radius},${lat},${lon});relation["name"="${branchName}"](around:${radius},${lat},${lon}););out;`;
+            }
+
+            fetch(overpassUrl)
+                .then(response => response.json())
+                .then(data => {
+                    if (data.elements.length === 0) {
+                        alert(`No locations found for ${branchName} within the radius.`);
+                        return;
+                    }
+
+                 
+                    map.eachLayer(layer => {
+                        if (layer instanceof L.Marker && !layer.options.title) {
+                            map.removeLayer(layer);
+                        }
+                    });
+
+                    
+                    data.elements.forEach(place => {
+                        const { lat: placeLat, lon: placeLon, tags } = place;
+                        const name = tags.name || 'Unnamed Place';
+
+                        const distance = calculateDistance(lat, lon, placeLat, placeLon);
+
+                        L.marker([placeLat, placeLon])
+                            .addTo(map)
+                            .bindPopup(`${name}<br>Distance: ${distance.toFixed(2)} km`);
+                    });
+                })
+                .catch(error => console.error('Error fetching locations:', error));
+        }
+
+     
+        function addCurrentLocationMarker(branchName) {
+            if (navigator.geolocation) {
+                navigator.geolocation.getCurrentPosition(
+                    position => {
+                        const userLat = position.coords.latitude;
+                        const userLon = position.coords.longitude;
+
+                        
+                        L.marker([userLat, userLon], { title: "Your Location" })
+                            .addTo(map)
+                            .bindPopup("You are here")
+                            .openPopup();
+
+                        
+                            map.setView([userLat, userLon], 12);
+
+                            if (branchName.toLowerCase().includes('near me')) {
+                                
+                                fetchLocations(branchName, userLat, userLon, 5000);
+                                }
+                    },
+                    error => {
+                        console.error("Error getting current location:", error);
+                    }
+                );
+            } else {
+                alert("Geolocation is not supported by this browser.");
+            }
+        }
+
+        document.getElementById('searchButton').addEventListener('click', () => {
+            const branchName = document.getElementById('branchInput').value.trim();
+            const branchInput = document.getElementById('branchInput').value.trim().toLowerCase();
+            
+            if (!branchInput.includes('near me')) {
+                    const cityBounds = [21.0800, 21.2800, 72.7400, 72.9200];
+                    fetchLocations(branchName, null, null, null, cityBounds);
+             }
+            if (!branchName) {
+                alert('Please enter a branch name.');
+                return;
+            }
+            addCurrentLocationMarker(branchName);
+        });
+    </script>
+</body>
+</html>
